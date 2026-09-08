@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step 2 — Hit Detection Test</title>
+<style>
+  body {
+    margin: 0;
+    background: #12141c;
+    color: #edeef2;
+    font-family: -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  p.status { color: #8b8fa3; font-size: 13px; margin-bottom: 16px; text-align: center; max-width: 34ch;}
+  .stage {
+    position: relative;
+    width: 100%;
+    max-width: 480px;
+    aspect-ratio: 3 / 4;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  video, canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+  video { transform: scaleX(-1); }
+  canvas { transform: scaleX(-1); }
+  .flash {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #ff5470;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .flash.active { animation: flash 0.25s ease-out; }
+  @keyframes flash { 0% { opacity: 0.5; } 100% { opacity: 0; } }
+  button {
+    margin-top: 16px;
+    padding: 12px 20px;
+    background: #ff5470;
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .stats {
+    display: flex;
+    gap: 24px;
+    margin-top: 14px;
+    font-family: monospace;
+  }
+  .stats div { text-align: center; }
+  .stats .val { font-size: 20px; color: #3ae8c4; }
+  .stats .lbl { font-size: 11px; color: #8b8fa3; }
+  .debug {
+    width: 100%;
+    max-width: 480px;
+    margin-top: 18px;
+    background: #1c1f2b;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: monospace;
+    font-size: 12px;
+  }
+  .debug .row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .debug .bar-bg { width: 100%; height: 10px; background: #262a3a; border-radius: 5px; overflow: hidden; margin-bottom: 12px; position: relative; }
+  .debug .bar-fill { height: 100%; background: #3ae8c4; width: 0%; }
+  .debug .threshold-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff5470; }
+  .tune-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+  .tune-row input[type=range] { flex: 1; }
+</style>
+</head>
+<body>
+<h1>Step 2: Wrist hit detection</h1>
+<p class="status" id="status">Press start, then try quick arm swings — like hitting a beat downward.</p>
+<div class="stage">
+  <video id="video" playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div class="flash" id="flash"></div>
+</div>
+<button id="startBtn">Start camera</button>
+<div class="stats">
+  <div><div class="val" id="hitCount">0</div><div class="lbl">hits detected</div></div>
+  <div><div class="val" id="fps">—</div><div class="lbl">fps</div></div>
+</div>
+
+<div class="debug">
+  <div class="row"><span>live wrist velocity</span><span id="velReadout">0.000</span></div>
+  <div class="bar-bg"><div class="bar-fill" id="velBar"></div><div class="threshold-line" id="threshLine"></div></div>
+  <div class="row"><span>threshold (drag to tune)</span><span id="threshVal">0.018</span></div>
+  <div class="tune-row">
+    <input type="range" id="threshSlider" min="0.005" max="0.06" step="0.001" value="0.018">
+  </div>
+  <div class="row" style="margin-top:10px; color:#8b8fa3;">Teal bar = current speed. Red line = threshold. Watch the teal bar while standing still, then note how high it spikes on a real swing — set the red line between those two.</div>
+  <div class="row" id="confRow" style="margin-top:10px; color:#8b8fa3;">detection confidence: <span id="confVal">—</span></div>
+</div>
+
+<script type="module">
+import {
+  PoseLandmarker,
+  FilesetResolver,
+  DrawingUtils
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const startBtn = document.getElementById('startBtn');
+const fpsEl = document.getElementById('fps');
+const hitCountEl = document.getElementById('hitCount');
+const flashEl = document.getElementById('flash');
+const velReadoutEl = document.getElementById('velReadout');
+const velBarEl = document.getElementById('velBar');
+const threshLineEl = document.getElementById('threshLine');
+const threshValEl = document.getElementById('threshVal');
+const threshSlider = document.getElementById('threshSlider');
+const confValEl = document.getElementById('confVal');
+const confRowEl = document.getElementById('confRow');
+let lowConfidenceThisFrame = false;
+
+// MediaPipe pose landmark indices we care about (body only, skip face 0-10)
+const BODY_CONNECTIONS_START_INDEX = 11;
+const LEFT_WRIST = 15;
+const RIGHT_WRIST = 16;
+
+let poseLandmarker = null;
+let running = false;
+let lastTime = performance.now();
+let hitCount = 0;
+
+// velocity tracking state per wrist — smoothedY reduces jitter noise before we ever measure velocity
+const wristState = {
+  [LEFT_WRIST]: { smoothedY: null, lastVel: 0, cooldown: 0, fastFrames: 0 },
+  [RIGHT_WRIST]: { smoothedY: null, lastVel: 0, cooldown: 0, fastFrames: 0 }
+};
+
+// tuning constants — threshold is now live-adjustable via the slider, starts from this default
+let VELOCITY_THRESHOLD = parseFloat(threshSlider.value);
+const COOLDOWN_FRAMES = 10;        // min frames between hits on the same wrist
+const SMOOTHING = 0.35;            // exponential moving average factor (0-1). Lower = stronger smoothing.
+const REQUIRED_FAST_FRAMES = 2;    // must stay above threshold for this many consecutive frames before it counts as a real swing, not a noise blip
+const VISIBILITY_THRESHOLD = 0.6;  // ignore landmark updates when MediaPipe itself isn't confident — prevents bad detections from looking like movement
+
+threshSlider.addEventListener('input', () => {
+  VELOCITY_THRESHOLD = parseFloat(threshSlider.value);
+  threshValEl.textContent = VELOCITY_THRESHOLD.toFixed(3);
+});
+
+// track the single highest velocity seen this frame across both wrists, just for the debug bar
+let debugMaxVel = 0;
+
+async function setup() {
+  statusEl.textContent = 'Loading pose model…';
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numPoses: 1
+  });
+  statusEl.textContent = 'Model loaded. Starting camera…';
+}
+
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+  video.srcObject = stream;
+  await video.play();
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  statusEl.textContent = 'Tracking live — try a sharp downward arm swing.';
+  running = true;
+  renderLoop();
+}
+
+function renderLoop() {
+  if (!running) return;
+  const now = performance.now();
+  if (poseLandmarker && video.readyState >= 2) {
+    const result = poseLandmarker.detectForVideo(video, now);
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (result.landmarks && result.landmarks.length > 0) {
+      const landmarks = result.landmarks[0];
+      const drawer = new DrawingUtils(ctx);
+
+      // only draw body connections/points, skip face (indices 0-10)
+      const bodyLandmarks = landmarks.map((lm, i) => (i >= BODY_CONNECTIONS_START_INDEX ? lm : null));
+      const bodyConnections = PoseLandmarker.POSE_CONNECTIONS.filter(
+        c => c.start >= BODY_CONNECTIONS_START_INDEX && c.end >= BODY_CONNECTIONS_START_INDEX
+      );
+      drawer.drawConnectors(landmarks, bodyConnections, { color: '#3ae8c4', lineWidth: 2 });
+      bodyLandmarks.forEach(lm => {
+        if (!lm) return;
+        drawer.drawLandmarks([lm], { radius: 4, color: '#ff5470' });
+      });
+
+      // check both wrists for a hit
+      debugMaxVel = 0;
+      lowConfidenceThisFrame = false;
+      checkWristHit(landmarks, LEFT_WRIST);
+      checkWristHit(landmarks, RIGHT_WRIST);
+      updateDebugBar();
+    }
+    ctx.restore();
+  }
+  const dt = now - lastTime;
+  lastTime = now;
+  fpsEl.textContent = Math.round(1000 / dt);
+  requestAnimationFrame(renderLoop);
+}
+
+function checkWristHit(landmarks, idx) {
+  const lm = landmarks[idx];
+  if (!lm) return;
+  const state = wristState[idx];
+
+  if (state.cooldown > 0) state.cooldown--;
+
+  // if the model itself isn't confident about this landmark this frame, skip it entirely —
+  // don't let a bad detection masquerade as real movement
+  const visibility = lm.visibility ?? 1;
+  if (visibility < VISIBILITY_THRESHOLD) {
+    lowConfidenceThisFrame = true;
+    return;
+  }
+
+  // smooth the y-position first so tiny landmark jitter doesn't look like real movement
+  if (state.smoothedY === null) {
+    state.smoothedY = lm.y;
+    return;
+  }
+  const prevSmoothedY = state.smoothedY;
+  state.smoothedY = SMOOTHING * lm.y + (1 - SMOOTHING) * prevSmoothedY;
+
+  const vel = state.smoothedY - prevSmoothedY; // positive = moving down (y grows downward)
+  debugMaxVel = Math.max(debugMaxVel, Math.abs(vel));
+
+  // require the wrist to be moving fast for several consecutive frames before we
+  // treat a slowdown as a genuine "hit" — this is what filters out single-frame noise spikes
+  if (vel > VELOCITY_THRESHOLD) {
+    state.fastFrames++;
+  } else {
+    if (state.fastFrames >= REQUIRED_FAST_FRAMES && state.cooldown === 0) {
+      registerHit();
+      state.cooldown = COOLDOWN_FRAMES;
+    }
+    state.fastFrames = 0;
+  }
+  state.lastVel = vel;
+}
+
+function updateDebugBar() {
+  velReadoutEl.textContent = debugMaxVel.toFixed(3);
+  const maxScale = 0.06; // matches slider max, just for bar scaling
+  const pct = Math.min(100, (debugMaxVel / maxScale) * 100);
+  velBarEl.style.width = pct + '%';
+  const threshPct = Math.min(100, (VELOCITY_THRESHOLD / maxScale) * 100);
+  threshLineEl.style.left = threshPct + '%';
+
+  if (lowConfidenceThisFrame) {
+    confValEl.textContent = 'LOW — likely lighting issue';
+    confRowEl.style.color = '#ff5470';
+  } else {
+    confValEl.textContent = 'good';
+    confRowEl.style.color = '#8b8fa3';
+  }
+}
+
+function registerHit() {
+  hitCount++;
+  hitCountEl.textContent = hitCount;
+  flashEl.classList.remove('active');
+  void flashEl.offsetWidth;
+  flashEl.classList.add('active');
+  if (navigator.vibrate) navigator.vibrate(40);
+}
+
+startBtn.addEventListener('click', async () => {
+  startBtn.disabled = true;
+  await setup();
+  await startCamera();
+});
+</script>
+</body>
+</html>

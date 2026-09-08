@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse — Haptic Rhythm Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #12141c;
+    --surface: #1c1f2b;
+    --surface-2: #262a3a;
+    --pulse: #ff5470;
+    --pulse-dim: #ff547033;
+    --good: #3ae8c4;
+    --text: #edeef2;
+    --muted: #8b8fa3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 32px 20px 60px;
+  }
+  .app {
+    width: 100%;
+    max-width: 420px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 28px;
+    line-height: 1.5;
+    max-width: 34ch;
+  }
+  .pulse-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 220px;
+    position: relative;
+    margin-bottom: 20px;
+  }
+  .ring {
+    position: absolute;
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    border: 2px solid var(--pulse);
+    opacity: 0;
+  }
+  .ring.fire {
+    animation: expand 0.6s ease-out;
+  }
+  @keyframes expand {
+    0% { transform: scale(0.8); opacity: 0.9; }
+    100% { transform: scale(1.9); opacity: 0; }
+  }
+  .core {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #ff7c92, var(--pulse));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 15px;
+    color: #fff;
+    box-shadow: 0 0 0 0 var(--pulse-dim);
+    transition: transform 0.08s ease-out;
+  }
+  .core.hit { transform: scale(1.12); }
+  .bpm-row {
+    display: flex;
+    justify-content: center;
+    gap: 28px;
+    margin-bottom: 24px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .bpm-row div { text-align: center; }
+  .bpm-row .num { font-size: 22px; font-weight: 500; }
+  .bpm-row .lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 18px 18px 20px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+  .file-btn {
+    display: block;
+    width: 100%;
+    padding: 13px;
+    background: var(--surface-2);
+    border: 1px dashed #3a3f52;
+    border-radius: 10px;
+    color: var(--text);
+    text-align: center;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  input[type=file] { display: none; }
+  .track-name {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--good);
+    text-align: center;
+    min-height: 16px;
+  }
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  button.action {
+    flex: 1;
+    padding: 13px;
+    border: none;
+    border-radius: 10px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--pulse); color: #fff; }
+  .btn-secondary { background: var(--surface-2); color: var(--text); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .mode-toggle {
+    display: flex;
+    background: var(--surface-2);
+    border-radius: 10px;
+    padding: 3px;
+    margin-bottom: 14px;
+  }
+  .mode-toggle button {
+    flex: 1;
+    padding: 9px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .mode-toggle button.active { background: var(--pulse); color: #fff; }
+  .tap-zone {
+    width: 100%;
+    padding: 34px;
+    background: var(--surface-2);
+    border: none;
+    border-radius: 14px;
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+  }
+  .tap-zone:active { background: var(--pulse); }
+  .score-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .score-box {
+    background: var(--surface-2);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+  }
+  .score-box .val {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 18px;
+    color: var(--good);
+  }
+  .score-box .lbl {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .note {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-top: 6px;
+  }
+  .history {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 10px;
+  }
+  .history .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-top: 1px solid var(--surface-2);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Pulse</h1>
+  <p class="sub">Feel the rhythm through vibration, then train your sense of timing against it.</p>
+
+  <div class="pulse-wrap">
+    <div class="ring" id="ring"></div>
+    <div class="core" id="core">no track</div>
+  </div>
+
+  <div class="bpm-row">
+    <div><div class="num" id="bpmVal">—</div><div class="lbl">est. bpm</div></div>
+    <div><div class="num" id="beatCount">0</div><div class="lbl">beats found</div></div>
+  </div>
+
+  <div class="card">
+    <h2>1. Load a track</h2>
+    <label class="file-btn" for="fileInput">Choose an audio file</label>
+    <input type="file" id="fileInput" accept="audio/*">
+    <div class="track-name" id="trackName"></div>
+    <div class="controls">
+      <button class="action btn-secondary" id="analyzeBtn" disabled>Analyze beats</button>
+      <button class="action btn-primary" id="playBtn" disabled>Play</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. Choose a mode</h2>
+    <div class="mode-toggle">
+      <button class="active" id="modeTrain">Trainer (tap)</button>
+      <button id="modeDance">Dance (motion)</button>
+    </div>
+
+    <div id="trainerPanel">
+      <button class="tap-zone" id="tapZone">Tap here in time with the buzz</button>
+      <div class="score-grid" id="scoreGrid" style="display:none;">
+        <div class="score-box"><div class="val" id="avgOffset">—</div><div class="lbl">avg offset (ms)</div></div>
+        <div class="score-box"><div class="val" id="hitRate">—</div><div class="lbl">beats matched</div></div>
+      </div>
+      <div class="history" id="sessionHistory"></div>
+    </div>
+
+    <div id="dancePanel" style="display:none;">
+      <p class="note">Strap your phone to your arm or waist and press start. The app reads motion spikes from the accelerometer and compares them to the beat — no need to hold or tap anything.</p>
+      <button class="action btn-secondary" id="motionPermBtn" style="width:100%;margin-top:8px;">Enable motion sensor</button>
+      <div class="score-grid" id="danceScoreGrid" style="display:none;">
+        <div class="score-box"><div class="val" id="danceAvgOffset">—</div><div class="lbl">avg offset (ms)</div></div>
+        <div class="score-box"><div class="val" id="danceHitRate">—</div><div class="lbl">beats matched</div></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">Vibration works on Android Chrome. iOS Safari doesn't support the Vibration API yet — use the visual pulse there, or a wired vibration accessory.</p>
+</div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const playBtn = document.getElementById('playBtn');
+const trackName = document.getElementById('trackName');
+const bpmVal = document.getElementById('bpmVal');
+const beatCountEl = document.getElementById('beatCount');
+const ring = document.getElementById('ring');
+const core = document.getElementById('core');
+const tapZone = document.getElementById('tapZone');
+const scoreGrid = document.getElementById('scoreGrid');
+const avgOffsetEl = document.getElementById('avgOffset');
+const hitRateEl = document.getElementById('hitRate');
+const sessionHistory = document.getElementById('sessionHistory');
+const modeTrain = document.getElementById('modeTrain');
+const modeDance = document.getElementById('modeDance');
+const trainerPanel = document.getElementById('trainerPanel');
+const dancePanel = document.getElementById('dancePanel');
+const motionPermBtn = document.getElementById('motionPermBtn');
+const danceScoreGrid = document.getElementById('danceScoreGrid');
+const danceAvgOffsetEl = document.getElementById('danceAvgOffset');
+const danceHitRateEl = document.getElementById('danceHitRate');
+
+let audioCtx = null;
+let audioBuffer = null;
+let audioEl = new Audio();
+let beatTimes = [];
+let nextBeatIdx = 0;
+let rafId = null;
+let tapTimes = [];
+let motionTimes = [];
+let motionEnabled = false;
+let lastAccelMag = 0;
+let sessionLog = [];
+
+// ---- Load file ----
+fileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  trackName.textContent = file.name;
+  audioEl.src = URL.createObjectURL(file);
+  analyzeBtn.disabled = false;
+  playBtn.disabled = true;
+  beatTimes = [];
+  bpmVal.textContent = '—';
+  beatCountEl.textContent = '0';
+
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const arrayBuffer = await file.arrayBuffer();
+  audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+});
+
+// ---- Beat detection (energy-based) ----
+analyzeBtn.addEventListener('click', () => {
+  if (!audioBuffer) return;
+  core.textContent = 'analyzing…';
+  setTimeout(() => {
+    beatTimes = detectBeats(audioBuffer);
+    beatCountEl.textContent = beatTimes.length;
+    if (beatTimes.length > 1) {
+      const totalSpan = beatTimes[beatTimes.length - 1] - beatTimes[0];
+      const avgGap = totalSpan / (beatTimes.length - 1);
+      bpmVal.textContent = Math.round(60 / avgGap);
+    }
+    core.textContent = 'ready';
+    playBtn.disabled = false;
+  }, 30);
+});
+
+function detectBeats(buffer) {
+  const data = buffer.getChannelData(0);
+  const sampleRate = buffer.sampleRate;
+  const windowSize = 1024;
+  const energies = [];
+  for (let i = 0; i < data.length; i += windowSize) {
+    let sum = 0;
+    const end = Math.min(i + windowSize, data.length);
+    for (let j = i; j < end; j++) sum += data[j] * data[j];
+    energies.push(sum / (end - i));
+  }
+  const historySize = Math.max(4, Math.round(sampleRate / windowSize));
+  const minGapWindows = Math.round(historySize * 0.28);
+  const beats = [];
+  let lastBeatIndex = -Infinity;
+
+  for (let i = historySize; i < energies.length; i++) {
+    let localSum = 0;
+    for (let k = i - historySize; k < i; k++) localSum += energies[k];
+    const localAvg = localSum / historySize;
+
+    let varSum = 0;
+    for (let k = i - historySize; k < i; k++) varSum += Math.pow(energies[k] - localAvg, 2);
+    const variance = varSum / historySize;
+    const C = Math.min(2.2, Math.max(1.15, (-0.0025714 * variance * 1e6) + 1.5142857));
+
+    if (energies[i] > C * localAvg && energies[i] > 1e-6 && (i - lastBeatIndex) > minGapWindows) {
+      beats.push(i * windowSize / sampleRate);
+      lastBeatIndex = i;
+    }
+  }
+  return beats;
+}
+
+// ---- Playback + beat scheduling ----
+playBtn.addEventListener('click', () => {
+  if (audioEl.paused) {
+    tapTimes = [];
+    motionTimes = [];
+    nextBeatIdx = 0;
+    scoreGrid.style.display = 'none';
+    danceScoreGrid.style.display = 'none';
+    audioEl.currentTime = 0;
+    audioEl.play();
+    playBtn.textContent = 'Stop';
+    loop();
+  } else {
+    stopPlayback();
+  }
+});
+
+audioEl.addEventListener('ended', stopPlayback);
+
+function stopPlayback() {
+  audioEl.pause();
+  cancelAnimationFrame(rafId);
+  playBtn.textContent = 'Play';
+  scoreSession();
+}
+
+function loop() {
+  const t = audioEl.currentTime;
+  while (nextBeatIdx < beatTimes.length && beatTimes[nextBeatIdx] <= t) {
+    fireBeat();
+    nextBeatIdx++;
+  }
+  rafId = requestAnimationFrame(loop);
+}
+
+function fireBeat() {
+  if (navigator.vibrate) navigator.vibrate(70);
+  ring.classList.remove('fire');
+  void ring.offsetWidth;
+  ring.classList.add('fire');
+  core.classList.remove('hit');
+  void core.offsetWidth;
+  core.classList.add('hit');
+}
+
+// ---- Trainer mode: tap scoring ----
+tapZone.addEventListener('pointerdown', () => {
+  if (!audioEl.paused) {
+    tapTimes.push(audioEl.currentTime);
+    if (navigator.vibrate) navigator.vibrate(20);
+  }
+});
+
+function scoreSession() {
+  if (beatTimes.length === 0) return;
+  const isDance = dancePanel.style.display !== 'none';
+  const taps = isDance ? motionTimes : tapTimes;
+  if (taps.length === 0) return;
+
+  const diffs = [];
+  let matched = 0;
+  beatTimes.forEach(bt => {
+    let nearest = null, minDiff = Infinity;
+    taps.forEach(tt => {
+      const d = tt - bt;
+      if (Math.abs(d) < Math.abs(minDiff)) { minDiff = d; nearest = tt; }
+    });
+    if (nearest !== null && Math.abs(minDiff) < 0.35) {
+      diffs.push(minDiff);
+      matched++;
+    }
+  });
+  if (diffs.length === 0) return;
+  const avgMs = Math.round((diffs.reduce((a, b) => a + b, 0) / diffs.length) * 1000);
+  const rate = Math.round((matched / beatTimes.length) * 100);
+
+  if (isDance) {
+    danceScoreGrid.style.display = 'grid';
+    danceAvgOffsetEl.textContent = (avgMs > 0 ? '+' : '') + avgMs;
+    danceHitRateEl.textContent = rate + '%';
+  } else {
+    scoreGrid.style.display = 'grid';
+    avgOffsetEl.textContent = (avgMs > 0 ? '+' : '') + avgMs;
+    hitRateEl.textContent = rate + '%';
+    sessionLog.push({ time: new Date().toLocaleTimeString(), avgMs, rate });
+    renderHistory();
+  }
+}
+
+function renderHistory() {
+  sessionHistory.innerHTML = sessionLog
+    .slice(-5)
+    .reverse()
+    .map(s => `<div class="row"><span>${s.time}</span><span>${s.avgMs > 0 ? '+' : ''}${s.avgMs}ms · ${s.rate}%</span></div>`)
+    .join('');
+}
+
+// ---- Mode toggle ----
+modeTrain.addEventListener('click', () => {
+  modeTrain.classList.add('active');
+  modeDance.classList.remove('active');
+  trainerPanel.style.display = 'block';
+  dancePanel.style.display = 'none';
+});
+modeDance.addEventListener('click', () => {
+  modeDance.classList.add('active');
+  modeTrain.classList.remove('active');
+  dancePanel.style.display = 'block';
+  trainerPanel.style.display = 'none';
+});
+
+// ---- Dance mode: motion sensor ----
+motionPermBtn.addEventListener('click', async () => {
+  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+    try {
+      const res = await DeviceMotionEvent.requestPermission();
+      if (res !== 'granted') { motionPermBtn.textContent = 'Permission denied'; return; }
+    } catch (e) {
+      motionPermBtn.textContent = 'Not supported on this device';
+      return;
+    }
+  }
+  motionEnabled = true;
+  motionPermBtn.textContent = 'Motion sensor active';
+  window.addEventListener('devicemotion', onMotion);
+});
+
+function onMotion(e) {
+  if (audioEl.paused) return;
+  const a = e.accelerationIncludingGravity || e.acceleration;
+  if (!a) return;
+  const mag = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2);
+  const jump = mag - lastAccelMag;
+  lastAccelMag = mag;
+  // simple spike detector: sudden jump in acceleration = a "hit"
+  if (jump > 6) {
+    const now = audioEl.currentTime;
+    const last = motionTimes[motionTimes.length - 1];
+    if (last === undefined || now - last > 0.2) {
+      motionTimes.push(now);
+    }
+  }
+}
+</script>
+</body>
+</html>
