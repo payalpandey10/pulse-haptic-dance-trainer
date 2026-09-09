@@ -297,7 +297,16 @@ tapZone.addEventListener('pointerdown', () => {
 function scoreSession() {
   if (beatTimes.length === 0) return;
   const hits = isDanceMode ? motionTimes : tapTimes;
-  if (hits.length === 0) return;
+
+  if (hits.length === 0) {
+    if (isDanceMode) {
+      danceScoreGrid.style.display = 'none';
+    } else {
+      scoreGrid.style.display = 'none';
+      sessionHistory.innerHTML = '<div class="row" style="color:#ff5470;">No taps detected — remember to tap WHILE the song is playing (button says Stop), not before or after.</div>';
+    }
+    return;
+  }
 
   const diffs = [];
   let matched = 0;
@@ -309,7 +318,15 @@ function scoreSession() {
     });
     if (nearest !== null && Math.abs(minDiff) < 0.35) { diffs.push(minDiff); matched++; }
   });
-  if (diffs.length === 0) return;
+  if (diffs.length === 0) {
+    if (isDanceMode) {
+      danceScoreGrid.style.display = 'none';
+    } else {
+      scoreGrid.style.display = 'none';
+      sessionHistory.innerHTML = '<div class="row" style="color:#ff5470;">Taps recorded, but none landed close enough to a beat to score — try again, watching the pulse closely.</div>';
+    }
+    return;
+  }
   const avgMs = Math.round((diffs.reduce((a, b) => a + b, 0) / diffs.length) * 1000);
   const rate = Math.round((matched / beatTimes.length) * 100);
 
